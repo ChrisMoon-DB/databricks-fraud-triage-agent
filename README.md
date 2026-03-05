@@ -40,6 +40,7 @@ CSV Files (Unity Catalog Volume)
 
 | # | Notebook | Purpose |
 |---|----------|---------|
+| 00 | `00_environment_setup` | Creates catalog, schemas, volume — run this first |
 | 01 | `01_pii_masking_setup` | Unity Catalog masking functions + secure views for PII protection |
 | 02 | `02_dlt_fraud_pipeline` | Lakeflow DLT pipeline: ingest CSVs → enrich → flag fraud |
 | 03 | `03_risk_scoring_agent` | AI reasoning agent using Foundation Model API for explainable risk scores |
@@ -71,15 +72,31 @@ A two-tab Flask application:
 | 20–49 | `YELLOW_REVIEW` | Held for analyst review |
 | < 20 | `GREEN_ALLOW` | Approved |
 
+### Sample Data
+
+The `data/` directory contains mock banking datasets:
+
+| File | Records | Description |
+|------|---------|-------------|
+| `transactions.csv` | 10,000 | Transaction data with amounts, merchant info, geolocation, fraud labels |
+| `login_logs.csv` | 8,000 | Login sessions with IPs, MFA changes, typing cadence, impossible travel flags |
+| `users.csv` | 500 | User profiles with names, emails, card numbers |
+
 ## Prerequisites
 
 - Databricks workspace with Unity Catalog enabled
-- Catalog: `cmoon_financial_security` with schemas: `fraud_raw`, `fraud_silver`, `fraud_serving`
-- Volume: `fraud_raw.source_files` containing `transactions.csv`, `login_logs.csv`, `users.csv`
 - SQL Warehouse
 - Lakebase enabled on the workspace
 
 ## Setup
+
+### 0. Environment Setup
+Run `notebooks/00_environment_setup.py` to create the catalog, schemas, and volume. Then upload the sample data:
+```bash
+databricks fs cp data/transactions.csv dbfs:/Volumes/cmoon_financial_security/fraud_raw/source_files/transactions.csv
+databricks fs cp data/login_logs.csv dbfs:/Volumes/cmoon_financial_security/fraud_raw/source_files/login_logs.csv
+databricks fs cp data/users.csv dbfs:/Volumes/cmoon_financial_security/fraud_raw/source_files/users.csv
+```
 
 ### 1. Data Pipeline
 Import `notebooks/02_dlt_fraud_pipeline.py` and create a DLT pipeline pointing to it with:
