@@ -4,34 +4,75 @@ A full-stack fraud detection and investigation platform built on Databricks, des
 
 ## Architecture
 
-```
-CSV Files (Unity Catalog Volume)
-    │
-    ▼
-┌──────────────────────────────┐
-│  DLT Pipeline (Lakeflow)     │
-│  Bronze → Silver → Gold      │
-│  5 fraud detection rules      │
-└──────────┬───────────────────┘
-           │
-   ┌───────┼────────┐
-   ▼       ▼        ▼
-┌──────┐ ┌──────┐ ┌──────────┐
-│ PII  │ │  AI  │ │  Genie   │
-│Mask  │ │Agent │ │  Space   │
-└──────┘ └──┬───┘ └──────────┘
-            │
-            ▼
-     ┌─────────────┐
-     │  Lakebase    │
-     │  (Postgres)  │
-     └──────┬──────┘
-            │
-            ▼
-     ┌─────────────┐
-     │  Sentinel    │
-     │  App (Flask) │
-     └─────────────┘
+![Architecture Diagram](docs/architecture.png)
+
+## Process Flow
+
+```mermaid
+flowchart TD
+    subgraph INGEST["1. Data Ingestion"]
+        CSV["CSV Files<br/>(transactions, logins, users)"]
+        VOL["Unity Catalog Volume"]
+        CSV --> VOL
+    end
+
+    subgraph DLT["2. DLT Pipeline (Lakeflow)"]
+        direction TB
+        BRONZE["Bronze Layer<br/>Raw ingestion via Auto Loader"]
+        SILVER["Silver Layer<br/>Cleaned, validated, joined"]
+        GOLD["Gold Layer<br/>Fraud-flagged transactions"]
+        BRONZE --> SILVER --> GOLD
+    end
+
+    subgraph RULES["3. Fraud Detection Rules"]
+        R1["High-Value Wire > $10K<br/>+25 pts"]
+        R2["Wire + MFA Change<br/>+30 pts"]
+        R3["Impossible Travel<br/>+25 pts"]
+        R4["Bot Typing < 80ms<br/>+10 pts"]
+        R5["Crypto > $5K<br/>+10 pts"]
+    end
+
+    subgraph SCORE["4. Risk Classification"]
+        RED["RED_BLOCK ≥ 50 pts<br/>Auto-blocked"]
+        YELLOW["YELLOW_REVIEW 20-49 pts<br/>Held for review"]
+        GREEN["GREEN_ALLOW < 20 pts<br/>Approved"]
+    end
+
+    subgraph ENRICH["5. Enrichment Layer"]
+        PII["PII Masking<br/>(Unity Catalog secure views)"]
+        AI["AI Risk Agent<br/>(Foundation Model API)"]
+        GENIE["Genie Space<br/>(NL Investigation)"]
+    end
+
+    subgraph SERVE["6. Real-Time Serving"]
+        LB["Lakebase<br/>(Serverless Postgres)"]
+    end
+
+    subgraph APP["7. Sentinel App"]
+        FQ["Fraud Queue Tab<br/>Triage dashboard"]
+        INV["Investigator Tab<br/>Genie-powered Q&A"]
+    end
+
+    VOL --> BRONZE
+    GOLD --> RULES
+    RULES --> SCORE
+    GOLD --> PII
+    GOLD --> AI
+    GOLD --> GENIE
+    AI -->|"upsert flagged txns"| LB
+    LB -->|"sub-second lookups"| FQ
+    GENIE -->|"NL queries"| INV
+
+    style INGEST fill:#E8F0FE,stroke:#1A73E8
+    style DLT fill:#FFF3E0,stroke:#E65100
+    style RULES fill:#FBE9E7,stroke:#BF360C
+    style SCORE fill:#F3E5F5,stroke:#6A1B9A
+    style ENRICH fill:#E8F5E9,stroke:#2E7D32
+    style SERVE fill:#FFF8E1,stroke:#F57F17
+    style APP fill:#FCE4EC,stroke:#C62828
+    style RED fill:#FFCDD2,stroke:#C62828,color:#C62828
+    style YELLOW fill:#FFF9C4,stroke:#F57F17,color:#F57F17
+    style GREEN fill:#C8E6C9,stroke:#2E7D32,color:#2E7D32
 ```
 
 ## Components
