@@ -38,14 +38,14 @@ CSV Files (Unity Catalog Volume)
 
 ### Notebooks
 
-| # | Notebook | Purpose |
-|---|----------|---------|
-| 00 | `00_environment_setup` | Creates catalog, schemas, volume — run this first |
-| 01 | `01_pii_masking_setup` | Unity Catalog masking functions + secure views for PII protection |
-| 02 | `02_dlt_fraud_pipeline` | Lakeflow DLT pipeline: ingest CSVs → enrich → flag fraud |
-| 03 | `03_risk_scoring_agent` | AI reasoning agent using Foundation Model API for explainable risk scores |
-| 04 | `04_lakebase_triage_store` | Lakebase Postgres provisioning + upsert service |
-| 05 | `05_genie_space_queries` | Certified SQL queries for Genie Space (banking KPIs) |
+| # | Notebook | Purpose | How to Run |
+|---|----------|---------|------------|
+| 00 | `00_environment_setup` | Creates catalog, schemas, volume | Run as notebook |
+| 01 | `01_pii_masking_setup` | Unity Catalog masking functions + secure views | Run as notebook |
+| 02 | `02_dlt_fraud_pipeline` | Lakeflow DLT pipeline: ingest CSVs → enrich → flag fraud | Create as DLT pipeline |
+| 03 | `03_risk_scoring_agent` | AI reasoning agent using Foundation Model API | Run as notebook |
+| 04 | `04_lakebase_triage_store` | Lakebase Postgres provisioning + upsert service | Run as notebook |
+| 05 | `05_genie_space_queries` | Certified SQL queries for Genie Space (banking KPIs) | Reference SQL for Genie Space UI |
 
 ### Databricks App — Sentinel Fraud Defense Platform
 
@@ -88,42 +88,105 @@ The `data/` directory contains mock banking datasets:
 - SQL Warehouse
 - Lakebase enabled on the workspace
 
-## Setup
+## Setup — Step by Step
 
-### 0. Environment Setup
-Run `notebooks/00_environment_setup.py` to create the catalog, schemas, and volume. Then upload the sample data:
+### Step 0: Environment Setup (Run as Notebook)
+
+Run `notebooks/00_environment_setup.py` interactively in a Databricks notebook. This creates the catalog, schemas, and volume.
+
+Then upload the sample data to the volume:
 ```bash
 databricks fs cp data/transactions.csv dbfs:/Volumes/cmoon_financial_security/fraud_raw/source_files/transactions.csv
 databricks fs cp data/login_logs.csv dbfs:/Volumes/cmoon_financial_security/fraud_raw/source_files/login_logs.csv
 databricks fs cp data/users.csv dbfs:/Volumes/cmoon_financial_security/fraud_raw/source_files/users.csv
 ```
 
-### 1. Data Pipeline
-Import `notebooks/02_dlt_fraud_pipeline.py` and create a DLT pipeline pointing to it with:
-- Catalog: `cmoon_financial_security`
-- Target schema: `fraud_silver`
-- Serverless: enabled
+### Step 1: DLT Pipeline (Create as Pipeline — do NOT run as notebook)
 
-### 2. PII Masking
-Run `notebooks/01_pii_masking_setup.py` to create masking functions and secure views.
+`notebooks/02_dlt_fraud_pipeline.py` is a **DLT pipeline definition**, not a regular notebook. Do **not** run it directly.
 
-### 3. Risk Scoring Agent
-Run `notebooks/03_risk_scoring_agent.py` to generate AI-powered risk explanations.
+1. In the Databricks workspace, go to **Workflows → Delta Live Tables → Create Pipeline**
+2. Configure:
+   - **Pipeline name**: `fraud_detection_pipeline`
+   - **Source code**: Select `notebooks/02_dlt_fraud_pipeline.py`
+   - **Catalog**: `cmoon_financial_security`
+   - **Target schema**: `fraud_silver`
+   - **Serverless**: Enabled
+3. Click **Start** to run the pipeline
 
-### 4. Lakebase Triage Store
-Run `notebooks/04_lakebase_triage_store.py` to provision Lakebase and upsert flagged transactions.
+This creates Bronze → Silver → Gold tables with all 5 fraud detection rules applied.
 
-### 5. Genie Space
-Create a Genie Space in the workspace UI using queries from `notebooks/05_genie_space_queries.sql`.
+### Step 2: PII Masking (Run as Notebook)
 
-### 6. Databricks App
-Deploy the app from the `app/` directory:
-```bash
-databricks apps create --json '{"name": "fraud-queue", "description": "Sentinel Fraud Defense Platform"}'
-databricks workspace mkdirs /Workspace/Users/<you>/fraud_queue_app/static
-# Upload app files to workspace, then:
-databricks apps deploy fraud-queue --source-code-path /Workspace/Users/<you>/fraud_queue_app
-```
+Run `notebooks/01_pii_masking_setup.py` interactively. This creates:
+- Masking functions (`mask_card_number`, `mask_email`, `mask_ip`) in Unity Catalog
+- Secure views in `fraud_serving` schema with PII redacted
+
+> **Note**: Run this after the DLT pipeline completes, since it creates views on top of the Silver/Gold tables.
+
+### Step 3: Risk Scoring Agent (Run as Notebook)
+
+Run `notebooks/03_risk_scoring_agent.py` interactively. This:
+- Reads flagged transactions from the Gold table
+- Calls the Foundation Model API (`databricks-claude-sonnet-4`) to generate human-readable risk explanations
+- Saves results to `fraud_serving.ai_risk_assessments`
+
+> **Note**: Requires a Foundation Model endpoint to be available on the workspace.
+
+### Step 4: Lakebase Triage Store (Run as Notebook)
+
+Run `notebooks/04_lakebase_triage_store.py` interactively. This:
+- Provisions a Lakebase (Serverless Postgres) instance
+- Creates the `real_time_fraud_triage` table with indexes
+- Upserts flagged transactions from the Gold table into Lakebase for sub-second lookups
+
+> **Note**: Requires Lakebase to be enabled on the workspace.
+
+### Step 5: Genie Space (Manual UI Setup)
+
+The Genie Space is configured through the Databricks UI, not via notebook.
+
+1. In the Databricks workspace, go to **Genie** (left sidebar)
+2. Click **New** to create a new Genie Space
+3. Configure:
+   - **Name**: `Fraud Investigation Assistant`
+   - **SQL Warehouse**: Select your serverless SQL warehouse
+   - **Tables**: Add the relevant tables from `cmoon_financial_security.fraud_silver` and `cmoon_financial_security.fraud_serving`
+4. Add certified SQL queries from `notebooks/05_genie_space_queries.sql`:
+   - In the Genie Space settings, go to **Sample questions** or **Instructions**
+   - Add the SQL queries as example questions with their corresponding SQL
+5. Note the **Genie Space ID** from the URL (you'll need it for the app config)
+
+### Step 6: Databricks App (Deploy via CLI)
+
+Deploy the Sentinel app from the `app/` directory.
+
+1. **Create the app**:
+   ```bash
+   databricks apps create --json '{"name": "fraud-queue", "description": "Sentinel Fraud Defense Platform"}'
+   ```
+
+2. **Upload app files** to your workspace:
+   ```bash
+   databricks workspace mkdirs /Workspace/Users/<your-email>/fraud_queue_app/static
+   # Upload app.py, app.yaml, requirements.txt, and static/logo.svg
+   ```
+
+3. **Update `app.py` configuration** — set these variables to match your environment:
+   - `LAKEBASE_HOST`: Your Lakebase instance hostname
+   - `LAKEBASE_DB`: Database name (e.g., `fraud_triage`)
+   - `GENIE_SPACE_ID`: The Genie Space ID from Step 5
+   - `WAREHOUSE_ID`: Your SQL Warehouse ID
+
+4. **Deploy**:
+   ```bash
+   databricks apps deploy fraud-queue --source-code-path /Workspace/Users/<your-email>/fraud_queue_app
+   ```
+
+5. **Grant permissions** to the app's service principal:
+   - `CAN_RUN` on the Genie Space
+   - `CAN_USE` on the SQL Warehouse
+   - `USE CATALOG`, `USE SCHEMA`, `SELECT` on relevant Unity Catalog objects
 
 ## Customer Requirements Addressed
 
